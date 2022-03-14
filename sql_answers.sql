@@ -63,3 +63,38 @@ INSERT INTO bookings (room_id, booked_date, booked_time, member_id, datetime_of_
     ("T2","2018-04-23","13:00:00","macejkovic73","2018-04-19 10:49:00","Cancelled"),
     ("T1","2018-05-25","10:00:00","marvin1","2018-05-21 11:20:46","Unpaid"),
     ("B2","2018-06-12","15:00:00","bbahringer","2018-05-30 14:40:23","Paid");
+
+
+
+CREATE VIEW member_bookings AS
+    SELECT bookings.id, room_id, room_type, booked_date, booked_time, member_id, datetime_of_booking, price, payment_status 
+    FROM
+    bookings
+    LEFT JOIN
+    rooms
+    ON
+    bookings.room_id = rooms.id;
+
+DELIMITER $$
+CREATE PROCEDURE insert_new_member(IN p_id VARCHAR(255), IN p_password VARCHAR(255), IN p_email VARCHAR(255))
+    BEGIN
+        INSERT INTO members (id, password, email) VALUES (p_id, p_password, p_email);
+    END
+
+CREATE PROCEDURE delete_member(IN p_id VARCHAR(255))
+    BEGIN
+        DELETE FROM members
+        WHERE id = p_id;
+    END
+
+CREATE PROCEDURE update_member_password(IN p_id VARCHAR(255), IN p_password VARCHAR(255))
+BEGIN
+    UPDATE members
+    SET password = p_password
+    WHERE id = p_id;
+END
+
+
+
+
+DELIMITER ;
