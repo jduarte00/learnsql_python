@@ -1,3 +1,6 @@
+%-------------
+% CREATE TABLES
+
 CREATE TABLE members (
     id VARCHAR(255) PRIMARY KEY,
     password VARCHAR(255) NOT NULL,
@@ -30,6 +33,9 @@ CREATE TABLE bookings(
     payment_status VARCHAR(255) NOT NULL DEFAULT 'Unpaid',
     CONSTRAINT uc1 UNIQUE(room_id, booked_date, booked_time)
 );
+
+%-------------
+% INSERTING VALUES
 
 INSERT INTO members (id, password, email, member_since, payment_due) VALUES 
     ("afeil","feil1988<3","Abdul.Feil@hotmail.com","2017-04-15 12:10:13",0),
@@ -64,7 +70,8 @@ INSERT INTO bookings (room_id, booked_date, booked_time, member_id, datetime_of_
     ("T1","2018-05-25","10:00:00","marvin1","2018-05-21 11:20:46","Unpaid"),
     ("B2","2018-06-12","15:00:00","bbahringer","2018-05-30 14:40:23","Paid");
 
-
+%-------------
+% CREATING VIEWS
 
 CREATE VIEW member_bookings AS
     SELECT bookings.id, room_id, room_type, booked_date, booked_time, member_id, datetime_of_booking, price, payment_status 
@@ -75,26 +82,148 @@ CREATE VIEW member_bookings AS
     ON
     bookings.room_id = rooms.id;
 
+%-------------
+% CREATING STORED PROCEDURES
+
 DELIMITER $$
 CREATE PROCEDURE insert_new_member(IN p_id VARCHAR(255), IN p_password VARCHAR(255), IN p_email VARCHAR(255))
     BEGIN
         INSERT INTO members (id, password, email) VALUES (p_id, p_password, p_email);
-    END
+    END$$
 
 CREATE PROCEDURE delete_member(IN p_id VARCHAR(255))
     BEGIN
         DELETE FROM members
         WHERE id = p_id;
-    END
+    END$$
 
 CREATE PROCEDURE update_member_password(IN p_id VARCHAR(255), IN p_password VARCHAR(255))
-BEGIN
-    UPDATE members
-    SET password = p_password
-    WHERE id = p_id;
-END
+    BEGIN
+        UPDATE members
+        SET password = p_password
+        WHERE id = p_id;
+    END$$
 
+CREATE PROCEDURE update_member_email(IN p_id VARCHAR(255), IN p_email VARCHAR(255))
+    BEGIN
+        UPDATE members
+        SET email = p_email
+        WHERE id = p_id;
+    END$$
 
+CREATE PROCEDURE make_booking(IN p_room_id VARCHAR(255), IN p_booked_date DATE, IN p_booked_time TIME, IN p_member_id VARCHAR(255))
+    BEGIN
+        DECLARE v_price FLOAT(5,2);
+        DECLARE v_payment_due FLOAT(4,2);
+        SELECT price INTO v_price FROM rooms WHERE id = p_room_id;
+        INSERT INTO bookings (room_id, booked_date, booked_time, member_id) VALUES (p_room_id,p_booked_date, p_booked_time, p_member_id);
+        SELECT payment_due INTO v_payment_due FROM members WHERE id = p_member_id;
+        UPDATE members SET payment_due = (v_payment_due + v_price) WHERE id = p_member_id;
+    END$$
 
+CREATE PROCEDURE update_payment(IN p_id INT)
+    BEGIN
+        DECLARE v_member_id VARCHAR(255);
+        DECLARE v_payment_due FLOAT(4,2);
+        DECLARE v_price FLOAT(5,2);
+        UPDATE bookings SET payment_status = 'Paid' WHERE id = p_id;
+        SELECT member_id INTO v_member_id FROM member_bookings WHERE id = p_id;
+        SELECT price INTO v_price FROM member_bookings WHERE id = p_id;
+        SELECT payment_due INTO v_payment_due FROM members WHERE id = v_member_id;
+        UPDATE members SET payment_due = (v_payment_due - v_price) WHERE id = v_member_id;
+    END$$
+
+CREATE PROCEDURE view_bookings(IN p_id VARCHAR(255))
+    BEGIN
+        SELECT * FROM member_bookings WHERE member_id = p_id;
+    END$$
+
+CREATE PROCEDURE search_room(IN p_room_type VARCHAR(255), IN p_booked_date DATE, IN p_booked_time TIME)
+    BEGIN
+    SELECT * FROM rooms WHERE id NOT IN 
+            (SELECT room_id FROM member_bookings
+            WHERE booked_date = p_booked_date  AND 
+            booked_time = p_booked_time AND 
+            payment_status != 'Cancelled')
+            AND room_type = p_room_type;
+    END$$
+
+CREATE PROCEDURE cancel_booking(IN p_booking_id INT, OUT p_message VARCHAR(255))
+    BEGIN 
+        DECLARE v_cancellation INT;
+        DECLARE v_member_id VARCHAR(255);
+        DECLARE v_payment_status VARCHAR(255);
+        DECLARE v_booked_date DATE;
+        DECLARE v_price FLOAT(5,2);
+        DECLARE v_payment_due FLOAT(4,2);
+        SET v_cancellation = 0;
+        SELECT member_id, booked_date, price, payment_status INTO v_member_id, v_booked_date, v_price, v_payment_status FROM
+        member_bookings 
+        WHERE
+        id =p_booking_id;
+        SELECT payment_due INTO v_payment_due FROM members WHERE id = v_member_id;
+        IF curdate() >= v_booked_date THEN
+            SELECT 'Cancellation cannot be done on/after the booked date' INTO p_message;
+        ELSEIF v_payment_status = 'Cancelled' OR v_payment_status = 'Paid' THEN
+            SELECT 'Booking has already been cacelled or paid' INTO p_message;
+        ELSE
+            UPDATE bookings SET payment_status = 'Cancelled' WHERE id = p_booking_id;
+            SET v_payment_due = v_payment_due - v_price;
+            SET v_cancellation = check_cancellation(p_booking_id);
+            IF v_cancellation >=2 THEN
+                SET v_payment_due = v_payment_due + 10.0;
+            END IF;
+            UPDATE members SET payment_due = v_payment_due WHERE id = v_member_id;
+            SELECT 'Booking Cancelled' INTO p_message;
+        END IF;
+    END$$
+
+%-------------
+% CREATING TRIGGERS
+
+CREATE TRIGGER payment_check BEFORE DELETE ON members FOR EACH ROW
+    BEGIN
+        DECLARE v_payment_due FLOAT(4,2);
+        SELECT payment_due INTO v_payment_due FROM members WHERE id = OLD.id;
+        IF v_payment_due > 0 THEN
+            INSERT INTO pending_terminations (id, email, payment_due) VALUES (OLD.id, OLD.email, OLD.payment_due);
+        END IF;
+    END$$
+
+%-------------
+% CREATING STORED FUNCTIONS AND CURSORS
+
+CREATE FUNCTION check_cancellation(p_booking_id INT) RETURNS INT 
+DETERMINISTIC
+    BEGIN
+        DECLARE v_done INT;
+        DECLARE v_cancellation INT;
+        DECLARE v_current_payment_status VARCHAR(255);
+            
+        
+        DECLARE cur CURSOR FOR
+            SELECT payment_status FROM bookings 
+            WHERE 
+            member_id = (SELECT member_id FROM bookings WHERE id = p_booking_id) 
+            ORDER BY daytime_of_booking DESC;
+        
+        DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
+        
+        SET v_done = 0;
+        SET v_cancellation = 0;
+        
+        OPEN cur;
+        
+        cancellation_loop: LOOP
+            FETCH cur INTO v_current_payment_status;
+            IF v_current_payment_status != "Cancelled" OR v_done = 1 THEN LEAVE cancellation_loop;
+            ELSEIF v_done =1 THEN LEAVE cancellation_loop;
+            ELSE SET v_cancellation = v_cancellation +1;
+            END IF;
+        END LOOP;
+        CLOSE cur;
+        
+        RETURN v_cancellation;
+    END$$
 
 DELIMITER ;
