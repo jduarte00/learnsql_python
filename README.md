@@ -8,4 +8,4 @@ The configuration to make the connection to the MySQL database from Python is on
 conda install -c conda-forge mysql-connector-python
 ```
 
-The only part of the notebook that cannot be done using Python is the creation of the database, you'll have to do this part using the MySQL Monitor.
+The only part of the notebook that cannot be done using Python is the creation of the database, you'll have to do this part using the MySQL Monitor and the command line.
